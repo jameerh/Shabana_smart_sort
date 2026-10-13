@@ -71,6 +71,16 @@ class SafeFileOperationService:
         except (PermissionError, OSError) as e:
             return False, f"Source file cannot be read (possibly locked or inaccessible): {e}"
 
+        # If it's a MOVE operation, verify file is not locked exclusively by another program
+        if op.action == ActionType.MOVE:
+            try:
+                with open(src, "r+b"):
+                    pass
+            except PermissionError:
+                return False, f"File '{src.name}' is currently in use or open in another program (e.g. PDF reader, Word, browser). Please close it first."
+            except OSError:
+                pass
+
         # 4. Check destination parent directory writeability
         dst_parent = dst.parent
         try:
@@ -212,7 +222,20 @@ class SafeFileOperationService:
                 raise FileOperationError("Source file disappeared before final unlink")
 
             # 6. Remove source
-            os.unlink(src)
+            try:
+                os.unlink(src)
+            except Exception as unlink_err:
+                # If we cannot remove the source (e.g. WinError 32: file open in Acrobat/Browser),
+                # remove the destination file so no ghost copy or duplicate remains!
+                if dst.exists():
+                    try:
+                        dst.unlink()
+                    except Exception:
+                        pass
+                raise FileOperationError(
+                    f"File '{src.name}' is currently in use or locked by another program (WinError 32). "
+                    "Please close any application viewing it and retry."
+                ) from unlink_err
 
         except Exception as e:
             # Cleanup temp file on failure, preserve source!

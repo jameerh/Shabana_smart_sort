@@ -94,6 +94,26 @@ class RulesPage(QWidget):
         bottom_layout.addWidget(delete_btn)
 
         bottom_layout.addStretch()
+
+        # Selective Rule Activation Controls
+        enable_only_btn = QPushButton("⭐ Enable ONLY Selected Rule")
+        enable_only_btn.setStyleSheet("background-color: #2563EB; font-weight: 600; padding: 6px 12px;")
+        enable_only_btn.setToolTip("Deactivates all other rules so only the selected rule will match files")
+        enable_only_btn.clicked.connect(self._enable_only_selected_rule)
+        bottom_layout.addWidget(enable_only_btn)
+
+        enable_all_btn = QPushButton("✓ Enable All")
+        enable_all_btn.setStyleSheet("background-color: #059669; font-weight: 500; padding: 6px 10px;")
+        enable_all_btn.setToolTip("Enables all rules for full comprehensive folder sorting")
+        enable_all_btn.clicked.connect(self._enable_all_rules)
+        bottom_layout.addWidget(enable_all_btn)
+
+        disable_all_btn = QPushButton("✗ Disable All")
+        disable_all_btn.setStyleSheet("background-color: #475569; font-weight: 500; padding: 6px 10px;")
+        disable_all_btn.setToolTip("Disables all rules")
+        disable_all_btn.clicked.connect(self._disable_all_rules)
+        bottom_layout.addWidget(disable_all_btn)
+
         layout.addLayout(bottom_layout)
 
         self.reload_rules()
@@ -137,6 +157,38 @@ class RulesPage(QWidget):
 
     def _toggle_enabled(self, rule_id: str, enabled: bool) -> None:
         self.container.rule_workflow.set_rule_enabled(rule_id, enabled)
+
+    def _enable_only_selected_rule(self) -> None:
+        """Enables ONLY the currently selected rule in the table, disabling all others."""
+        rule = self._get_selected_rule()
+        if not rule:
+            QMessageBox.information(
+                self, "Select Rule First",
+                "Please click a rule row in the table (e.g. Satbara or Farmer IDs) then click this button."
+            )
+            return
+
+        for r in self.rules:
+            should_enable = (r.id == rule.id)
+            self.container.rule_workflow.set_rule_enabled(r.id, should_enable)
+        self.reload_rules()
+        QMessageBox.information(
+            self, "Selective Rule Mode Active",
+            f"✓ Rule '{rule.name}' is now the ONLY active rule.\n\nAll other rules have been disabled. Only files matching this rule will be organized."
+        )
+
+    def _enable_all_rules(self) -> None:
+        """Enables all rules for comprehensive sorting."""
+        for r in self.rules:
+            self.container.rule_workflow.set_rule_enabled(r.id, True)
+        self.reload_rules()
+        QMessageBox.information(self, "All Rules Enabled", "All rules are now active and will be evaluated together.")
+
+    def _disable_all_rules(self) -> None:
+        """Disables all rules."""
+        for r in self.rules:
+            self.container.rule_workflow.set_rule_enabled(r.id, False)
+        self.reload_rules()
 
     def _get_selected_rule(self) -> Optional[Rule]:
         curr = self.table.currentRow()

@@ -77,7 +77,7 @@ class PreviewPage(QWidget):
         filter_box.setSpacing(8)
         filter_box.setContentsMargins(10, 8, 10, 8)
 
-        # Row A: Quick Smart Presets
+        # Row A: Quick Smart Presets & Rule Filter
         presets_row = QHBoxLayout()
         preset_lbl = QLabel("Smart Filters:")
         preset_lbl.setStyleSheet("font-weight: 600; color: #60A5FA; font-size: 12px;")
@@ -99,20 +99,30 @@ class PreviewPage(QWidget):
             presets_row.addWidget(btn)
             self.chip_buttons.append(btn)
 
+        presets_row.addSpacing(12)
+        rule_lbl = QLabel("Filter by Rule:")
+        rule_lbl.setStyleSheet("font-weight: 600; color: #E2E8F0; font-size: 12px;")
+        presets_row.addWidget(rule_lbl)
+        self.rule_combo = QComboBox()
+        self.rule_combo.setMinimumWidth(160)
+        self.rule_combo.addItem("All Rules", "ALL")
+        self.rule_combo.currentIndexChanged.connect(self._apply_table_visibility)
+        presets_row.addWidget(self.rule_combo)
+
         presets_row.addStretch()
         filter_box.addLayout(presets_row)
 
-        # Row B: Date Range & Search Text
+        # Row B: Date Range, Search Text & Selection Tools
         filter_ctrls_row = QHBoxLayout()
         search_lbl = QLabel("Search:")
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Filter name...")
-        self.search_input.setFixedWidth(160)
+        self.search_input.setFixedWidth(140)
         self.search_input.textChanged.connect(self._apply_table_visibility)
         filter_ctrls_row.addWidget(search_lbl)
         filter_ctrls_row.addWidget(self.search_input)
 
-        self.date_filter_chk = QCheckBox("Filter Date Range:")
+        self.date_filter_chk = QCheckBox("Filter Date:")
         self.date_filter_chk.stateChanged.connect(self._apply_table_visibility)
         filter_ctrls_row.addWidget(self.date_filter_chk)
 
@@ -134,18 +144,26 @@ class PreviewPage(QWidget):
         filter_ctrls_row.addWidget(lbl_to)
         filter_ctrls_row.addWidget(self.date_to)
 
-        filter_ctrls_row.addStretch()
+        filter_ctrls_row.addSpacing(10)
 
-        # Selection Buttons
-        sel_filtered_btn = QPushButton("Select All Filtered")
-        sel_filtered_btn.setStyleSheet("padding: 2px 8px; font-size: 11px;")
-        sel_filtered_btn.clicked.connect(lambda: self._set_filtered_selected(True))
+        # Targeted Selection Buttons
+        sel_only_visible_btn = QPushButton("🎯 Select ONLY Filtered / Visible")
+        sel_only_visible_btn.setStyleSheet("padding: 4px 10px; font-size: 11px; background-color: #2563EB; font-weight: 700; color: #FFFFFF;")
+        sel_only_visible_btn.setToolTip("Unchecks all hidden files and checks ONLY currently visible files for moving")
+        sel_only_visible_btn.clicked.connect(self._select_only_filtered)
+        filter_ctrls_row.addWidget(sel_only_visible_btn)
+
+        sel_all_btn = QPushButton("Select All")
+        sel_all_btn.setStyleSheet("padding: 4px 8px; font-size: 11px;")
+        sel_all_btn.clicked.connect(lambda: self._set_all_selected(True))
+        filter_ctrls_row.addWidget(sel_all_btn)
+
         desel_all_btn = QPushButton("Deselect All")
-        desel_all_btn.setStyleSheet("padding: 2px 8px; font-size: 11px;")
+        desel_all_btn.setStyleSheet("padding: 4px 8px; font-size: 11px; background-color: #475569;")
         desel_all_btn.clicked.connect(lambda: self._set_all_selected(False))
-        filter_ctrls_row.addWidget(sel_filtered_btn)
         filter_ctrls_row.addWidget(desel_all_btn)
 
+        filter_ctrls_row.addStretch()
         filter_box.addLayout(filter_ctrls_row)
         layout.addWidget(filter_frame)
 
@@ -271,6 +289,10 @@ class PreviewPage(QWidget):
 
     def _set_preset_filter(self, tag: str) -> None:
         self._filter_tag = tag
+        if hasattr(self, "rule_combo"):
+            self.rule_combo.blockSignals(True)
+            self.rule_combo.setCurrentIndex(0)
+            self.rule_combo.blockSignals(False)
         self._apply_table_visibility()
 
     def _recalculate_preview(self) -> None:
@@ -291,6 +313,19 @@ class PreviewPage(QWidget):
         )
 
         self.planned_operations = report.operations
+
+        # Populate rule combo with unique matched rules
+        if hasattr(self, "rule_combo"):
+            self.rule_combo.blockSignals(True)
+            self.rule_combo.clear()
+            self.rule_combo.addItem("All Rules", "ALL")
+            seen_rules = set()
+            for op in self.planned_operations:
+                rname = op.matched_rule_name or "Unmatched (Ignored)"
+                if rname not in seen_rules:
+                    seen_rules.add(rname)
+                    self.rule_combo.addItem(rname, rname)
+            self.rule_combo.blockSignals(False)
 
         # Update stats
         self.lbl_total.setText(f"Total: {report.total_files}")
@@ -377,7 +412,19 @@ class PreviewPage(QWidget):
             op.selected_for_execution = selected
         self._update_selected_count_label()
 
+    def _select_only_filtered(self) -> None:
+        """Selects ONLY visible/filtered rows and unselects all hidden rows."""
+        for r in range(self.table.rowCount()):
+            is_visible = not self.table.isRowHidden(r)
+            chk = self.table.cellWidget(r, 0)
+            if isinstance(chk, QCheckBox):
+                chk.setChecked(is_visible)
+            if 0 <= r < len(self.planned_operations):
+                self.planned_operations[r].selected_for_execution = is_visible
+        self._update_selected_count_label()
+
     def _set_filtered_selected(self, selected: bool) -> None:
+        """Legacy helper for programmatic selection."""
         for r in range(self.table.rowCount()):
             if not self.table.isRowHidden(r):
                 chk = self.table.cellWidget(r, 0)
@@ -388,9 +435,13 @@ class PreviewPage(QWidget):
         self._update_selected_count_label()
 
     def _update_selected_count_label(self) -> None:
-        count = sum(1 for op in self.planned_operations if op.selected_for_execution)
-        self.lbl_selected.setText(f"Selected: {count}")
-        self.execute_btn.setText(f"⚡ One-Click Move Selected Files ({count})")
+        total_selected = sum(1 for op in self.planned_operations if op.selected_for_execution)
+        visible_selected = sum(
+            1 for r in range(min(self.table.rowCount(), len(self.planned_operations)))
+            if not self.table.isRowHidden(r) and self.planned_operations[r].selected_for_execution
+        )
+        self.lbl_selected.setText(f"Selected: {total_selected} ({visible_selected} visible)")
+        self.execute_btn.setText(f"⚡ One-Click Move Selected Files ({total_selected})")
 
     def _apply_table_visibility(self) -> None:
         query = self.search_input.text().strip().lower()
@@ -401,6 +452,11 @@ class PreviewPage(QWidget):
         q_to = self.date_to.date().toPython()
 
         file_map = {str(item.path): item for item in self.current_files}
+
+        # Rule filter dropdown
+        selected_rule = "ALL"
+        if hasattr(self, "rule_combo"):
+            selected_rule = self.rule_combo.currentData() or "ALL"
 
         for row in range(self.table.rowCount()):
             if row >= len(self.planned_operations):
@@ -436,7 +492,13 @@ class PreviewPage(QWidget):
                     f_date = f_item.modified_at.date()
                     date_match = (q_from <= f_date <= q_to)
 
-            is_visible = tag_match and search_match and date_match
+            # 4. Rule Dropdown Match
+            rule_match = True
+            if selected_rule != "ALL":
+                op_rule = op.matched_rule_name or "Unmatched (Ignored)"
+                rule_match = (op_rule == selected_rule)
+
+            is_visible = tag_match and search_match and date_match and rule_match
             self.table.setRowHidden(row, not is_visible)
 
         self._update_selected_count_label()

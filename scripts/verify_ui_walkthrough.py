@@ -71,6 +71,8 @@ def run_full_ui_walkthrough(screenshot_dir: Path) -> dict:
     app.setFont(QFont("Segoe UI", 10))
 
     container = bootstrap_application()
+    for r in container.rule_workflow.get_all_rules():
+        container.rule_workflow.set_rule_enabled(r.id, True)
     window = MainWindow(container)
     window.resize(1200, 800)
     window.show()

@@ -90,3 +90,40 @@ def test_audit_report_export(container, temp_dir, sample_files):
     assert json_path.exists()
     assert json_path.stat().st_size > 0
     assert "sort_job_id" in json_path.read_text(encoding="utf-8")
+
+
+def test_selective_rule_enablement_and_isolation(container, sample_files, temp_dir):
+    """Verifies that isolating a single rule only matches files matching that rule."""
+    src_dir, items = sample_files
+    wf = container.rule_workflow
+
+    all_rules = wf.get_all_rules()
+    satbara_rule = next((r for r in all_rules if "Satbara" in r.name), None)
+    assert satbara_rule is not None
+
+    # Enable ONLY Satbara rule, disabling all others
+    for r in all_rules:
+        wf.set_rule_enabled(r.id, r.id == satbara_rule.id)
+
+    active_rules = wf.get_all_rules(enabled_only=True)
+    assert len(active_rules) == 1
+    assert active_rules[0].id == satbara_rule.id
+
+    # Generate preview with sample files
+    preview = container.preview_workflow.generate_preview(
+        files=items,
+        rules=active_rules,
+        target_root=temp_dir / "Organized",
+    )
+
+    # Only files with satbara in filename should be matched
+    matched_ops = [op for op in preview.operations if op.matched_rule_id == satbara_rule.id]
+    for op in matched_ops:
+        assert "satbara" in op.source_path.lower()
+
+    # Other files (like generic pdfs, images, etc.) MUST be marked unmatched and unselected
+    unmatched_ops = [op for op in preview.operations if op.matched_rule_id is None]
+    for op in unmatched_ops:
+        assert "satbara" not in op.source_path.lower()
+        assert op.selected_for_execution is False
+
