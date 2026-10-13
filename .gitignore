@@ -1,0 +1,17 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+dist/
+build/
+*.egg-info/
+.venv/
+venv/
+.idea/
+.vscode/
+*.log
