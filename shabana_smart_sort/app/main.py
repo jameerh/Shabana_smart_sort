@@ -1,6 +1,7 @@
 """Main application entry point."""
 import sys
 from PySide6.QtWidgets import QApplication
+from PySide6.QtGui import QFont
 from PySide6.QtCore import Qt
 
 from shabana_smart_sort.app.bootstrap import bootstrap_application
@@ -18,6 +19,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("Shabana Smart Sort")
     app.setOrganizationName("ShabanaSmartSort")
+    app.setFont(QFont("Segoe UI", 10))
 
     # Bootstrap container
     container = bootstrap_application()
