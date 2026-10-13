@@ -34,10 +34,12 @@ class DestinationEngine:
         base_target_root: Path,
         item: FileItem,
         rule: Rule,
+        override_filename: Optional[str] = None,
     ) -> Path:
         """
         Calculates destination path by resolving the template in the rule's action.
         Guarantees that the resolved path never traverses outside the target root.
+        Supports custom override filename (e.g. for sequential renaming).
         """
         template = rule.action.destination_template or "Organized/{category}/"
         # If the rule has an explicit custom root, use it; otherwise use base_target_root
@@ -82,8 +84,9 @@ class DestinationEngine:
         # Destination directory
         dest_dir = target_root.joinpath(*sanitized_parts)
 
-        # Final file path (retaining the file's original name)
-        final_path = dest_dir / item.name
+        # Final filename (retaining original name or using override)
+        filename_to_use = cls.sanitize_path_component(override_filename) if override_filename else item.name
+        final_path = dest_dir / filename_to_use
 
         # Security check: Ensure final path is inside or child of target_root
         resolved_final = final_path.resolve()
@@ -91,6 +94,6 @@ class DestinationEngine:
             resolved_final.relative_to(target_root)
         except ValueError:
             # Traversal escape detected! Fallback safely to directly inside target_root
-            final_path = target_root / "Organized" / category_clean / item.name
+            final_path = target_root / "Organized" / category_clean / filename_to_use
 
         return final_path

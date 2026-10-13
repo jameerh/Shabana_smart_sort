@@ -101,10 +101,18 @@ class ScanPage(QWidget):
         preset_label.setStyleSheet("color: #94A3B8;")
         filter_layout.addWidget(preset_label)
 
-        for p_name, p_cat in [("PDFs", "document"), ("Images", "image"), ("Archives", "archive"), ("Installers", "installer")]:
+        presets = [
+            ("📜 Satbara", "preset_satbara"),
+            ("🌾 Farmer 27_", "preset_farmer"),
+            ("💬 WhatsApp", "preset_whatsapp"),
+            ("PDFs", "document"),
+            ("Images", "image"),
+            ("Archives", "archive"),
+        ]
+        for p_name, p_target in presets:
             btn = QPushButton(p_name)
             btn.setStyleSheet("padding: 3px 8px; font-size: 11px;")
-            btn.clicked.connect(lambda ch, c=p_cat: self._set_category_preset(c))
+            btn.clicked.connect(lambda ch, t=p_target: self._handle_preset_click(t))
             filter_layout.addWidget(btn)
 
         all_btn = QPushButton("Reset Filters")
@@ -150,6 +158,20 @@ class ScanPage(QWidget):
         chosen = QFileDialog.getExistingDirectory(self, "Select Folder to Organize", curr)
         if chosen:
             self.folder_input.setText(chosen)
+
+    def _handle_preset_click(self, target: str) -> None:
+        if target == "preset_satbara":
+            self.cat_filter_combo.setCurrentIndex(0)
+            self.search_input.setText("satbara")
+        elif target == "preset_farmer":
+            self.cat_filter_combo.setCurrentIndex(0)
+            self.search_input.setText("27_")
+        elif target == "preset_whatsapp":
+            self.cat_filter_combo.setCurrentIndex(0)
+            self.search_input.setText("whatsapp")
+        else:
+            self.search_input.clear()
+            self._set_category_preset(target)
 
     def _set_category_preset(self, cat_val: str) -> None:
         idx = self.cat_filter_combo.findData(cat_val)

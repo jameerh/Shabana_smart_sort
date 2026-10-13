@@ -32,6 +32,9 @@ class RuleAction(BaseModel):
     )
     collision_policy: CollisionPolicy = CollisionPolicy.RENAME_NEW
     custom_root_path: Optional[str] = None  # None means relative to organized base / source
+    rename_prefix: Optional[str] = None     # Optional sequential rename prefix (e.g. "xyz")
+    rename_pattern: Optional[str] = None    # Pattern such as "{prefix}_{counter}"
+    start_counter: int = 1                  # Starting number for sequential rename
 
 
 class Rule(BaseModel):

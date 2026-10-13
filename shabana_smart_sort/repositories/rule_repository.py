@@ -166,16 +166,82 @@ class RuleRepository:
                 )
 
     def _ensure_default_rules(self) -> None:
-        """Seeds default rules if none exist."""
+        """Seeds default and specialized rules if not already present."""
         conn = self.db.get_connection()
         cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM rules")
-        count = cur.fetchone()[0]
-        if count > 0:
-            return
+        cur.execute("SELECT name FROM rules")
+        existing_names = {row[0] for row in cur.fetchall()}
 
-        logger.info("Seeding initial default rules for Downloads folder...")
         defaults = [
+            Rule(
+                name="Satbara Land Records (7/12)",
+                description="Sort land record Satbara PDFs (7/12 extracts) by Year",
+                priority=5,
+                conditions=[
+                    RuleCondition(
+                        target=ConditionTarget.EXTENSION,
+                        operator=ConditionOperator.IS_ONE_OF,
+                        value=[".pdf"],
+                    ),
+                    RuleCondition(
+                        target=ConditionTarget.FILENAME,
+                        operator=ConditionOperator.CONTAINS,
+                        value="satbara",
+                        case_sensitive=False,
+                    ),
+                ],
+                action=RuleAction(
+                    action_type=ActionType.MOVE,
+                    destination_template="Organized/Satbara_Records/{year}/",
+                    collision_policy=CollisionPolicy.RENAME_NEW,
+                )
+            ),
+            Rule(
+                name="Farmer IDs (27_ Series)",
+                description="Sort Maharashtra PM-Kisan / DBT / AgriStack Farmer IDs (27_...)",
+                priority=6,
+                conditions=[
+                    RuleCondition(
+                        target=ConditionTarget.FILENAME,
+                        operator=ConditionOperator.STARTS_WITH,
+                        value="27_",
+                        case_sensitive=False,
+                    ),
+                    RuleCondition(
+                        target=ConditionTarget.EXTENSION,
+                        operator=ConditionOperator.IS_ONE_OF,
+                        value=[".pdf"],
+                    ),
+                ],
+                action=RuleAction(
+                    action_type=ActionType.MOVE,
+                    destination_template="Organized/Farmer_IDs_27/",
+                    collision_policy=CollisionPolicy.RENAME_NEW,
+                )
+            ),
+            Rule(
+                name="WhatsApp Images & Photos",
+                description="Sort WhatsApp Image files with optional date batch renaming",
+                priority=7,
+                conditions=[
+                    RuleCondition(
+                        target=ConditionTarget.FILENAME,
+                        operator=ConditionOperator.CONTAINS,
+                        value="whatsapp",
+                        case_sensitive=False,
+                    ),
+                    RuleCondition(
+                        target=ConditionTarget.EXTENSION,
+                        operator=ConditionOperator.IS_ONE_OF,
+                        value=[".jpeg", ".jpg", ".png", ".webp"],
+                    ),
+                ],
+                action=RuleAction(
+                    action_type=ActionType.MOVE,
+                    destination_template="Organized/WhatsApp_Images/{year}/{month}/",
+                    collision_policy=CollisionPolicy.RENAME_NEW,
+                )
+            ),
             Rule(
                 name="PDF Documents",
                 description="Organize all PDF files by Year and Month",
@@ -297,4 +363,5 @@ class RuleRepository:
             ),
         ]
         for rule in defaults:
-            self.save(rule)
+            if rule.name not in existing_names:
+                self.save(rule)

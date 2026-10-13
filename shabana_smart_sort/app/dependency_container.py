@@ -41,7 +41,7 @@ class DependencyContainer:
         verify_sha = self.config_mgr.get("verify_sha256", False)
         follow_links = self.config_mgr.get("follow_symlinks", False)
         self.discovery_engine = DiscoveryEngine(follow_symlinks=follow_links)
-        self.rule_engine = RuleEngine()
+        self.rule_engine = RuleEngine(self.rule_repo.get_all(enabled_only=True))
 
         # Services
         ver_level = VerificationLevel.SHA256_HASH if verify_sha else VerificationLevel.SIZE_ONLY

@@ -91,6 +91,7 @@ class PlannedOperation:
     executed_at: Optional[datetime] = None
     error_message: Optional[str] = None
     is_cross_volume: bool = False
+    rename_applied: Optional[str] = None
 
 
 @dataclass

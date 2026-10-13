@@ -145,3 +145,51 @@ class PreviewWorkflow:
             sufficient_disk_space=sufficient_space,
             free_disk_space_bytes=free_bytes,
         )
+
+    @staticmethod
+    def apply_sequential_rename(
+        operations: List[PlannedOperation],
+        prefix: str,
+        start_counter: int = 1,
+        selected_only: bool = True,
+    ) -> int:
+        """
+        Sequentially renames operations in ascending order.
+        Example: prefix='xyz' -> 'xyz_1.jpeg', 'xyz_2.jpeg', etc.
+        """
+        targets = [op for op in operations if (not selected_only or op.selected_for_execution)]
+        # Sort targets in ascending order by source path
+        targets.sort(key=lambda op: op.source_path.lower())
+
+        counter = start_counter
+        for op in targets:
+            ext = Path(op.source_path).suffix
+            new_filename = f"{prefix}_{counter}{ext}"
+            dest_dir = Path(op.destination_path).parent
+            op.destination_path = str(dest_dir / new_filename)
+            op.rename_applied = new_filename
+            counter += 1
+        return len(targets)
+
+    @staticmethod
+    def reset_renames(operations: List[PlannedOperation]) -> None:
+        """Restores original destination filenames."""
+        for op in operations:
+            if op.rename_applied:
+                dest_dir = Path(op.destination_path).parent
+                orig_name = Path(op.original_destination_path).name
+                op.destination_path = str(dest_dir / orig_name)
+                op.rename_applied = None
+
+    @staticmethod
+    def override_output_directory(
+        operations: List[PlannedOperation],
+        new_dir: Path,
+        selected_only: bool = True,
+    ) -> int:
+        """Overrides the destination directory for target operations."""
+        targets = [op for op in operations if (not selected_only or op.selected_for_execution)]
+        for op in targets:
+            curr_filename = Path(op.destination_path).name
+            op.destination_path = str(new_dir / curr_filename)
+        return len(targets)
