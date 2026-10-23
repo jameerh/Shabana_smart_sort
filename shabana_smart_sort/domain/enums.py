@@ -33,6 +33,8 @@ class ConditionTarget(str, Enum):
     IS_HIDDEN = "is_hidden"
     IS_READONLY = "is_readonly"
     IS_EMPTY = "is_empty"
+    FILE_CONTENT = "file_content"       # Text found inside files (.txt, .csv, .pdf, .docx, .xlsx, .pptx)
+    IMAGE_OCR_TEXT = "image_ocr_text"   # Text recognized inside images via OCR
 
 
 class ConditionOperator(str, Enum):

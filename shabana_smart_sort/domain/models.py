@@ -31,6 +31,8 @@ class FileItem:
     parent_dir: Path = field(default_factory=Path)
     relative_path: str = ""
     sha256: Optional[str] = None
+    content_text: Optional[str] = None
+    ocr_text: Optional[str] = None
 
     @property
     def extension_no_dot(self) -> str:

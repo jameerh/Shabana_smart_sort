@@ -13,7 +13,7 @@ from shabana_smart_sort.domain.enums import (
     CollisionPolicy,
     FileCategory,
 )
-from shabana_smart_sort.domain.rule_schema import Rule, RuleCondition, RuleAction
+from shabana_smart_sort.domain.rule_schema import Rule, RuleCondition, ConditionGroup, RuleAction
 from shabana_smart_sort.infrastructure.database import DatabaseManager
 
 logger = logging.getLogger("ShabanaSmartSort.RuleRepo")
@@ -40,15 +40,52 @@ class RuleRepository:
         rules: List[Rule] = []
         for row in rows:
             rule_id = row["id"]
-            # Fetch conditions
+            
+            # 1. Fetch condition groups if any exist
             cur.execute(
-                "SELECT * FROM rule_conditions WHERE rule_id = ? ORDER BY rowid ASC",
+                "SELECT * FROM rule_groups WHERE rule_id = ? ORDER BY group_order ASC, rowid ASC",
+                (rule_id,)
+            )
+            group_rows = cur.fetchall()
+            condition_groups: List[ConditionGroup] = []
+            
+            for g_row in group_rows:
+                g_id = g_row["id"]
+                cur.execute(
+                    "SELECT * FROM rule_conditions WHERE rule_id = ? AND group_id = ? ORDER BY rowid ASC",
+                    (rule_id, g_id)
+                )
+                g_cond_rows = cur.fetchall()
+                g_conditions = []
+                for c_row in g_cond_rows:
+                    raw_val = c_row["value"]
+                    try:
+                        val = json.loads(raw_val)
+                    except Exception:
+                        val = raw_val
+                    g_conditions.append(RuleCondition(
+                        id=c_row["id"],
+                        target=ConditionTarget(c_row["target"]),
+                        operator=ConditionOperator(c_row["operator"]),
+                        value=val,
+                        case_sensitive=bool(c_row["case_sensitive"]),
+                        description=c_row["description"],
+                    ))
+                condition_groups.append(ConditionGroup(
+                    id=g_id,
+                    logical_op=LogicalOperator(g_row["logical_op"]),
+                    conditions=g_conditions,
+                    description=g_row["description"],
+                ))
+
+            # 2. Fetch standalone/legacy conditions (where group_id IS NULL or empty)
+            cur.execute(
+                "SELECT * FROM rule_conditions WHERE rule_id = ? AND (group_id IS NULL OR group_id = '') ORDER BY rowid ASC",
                 (rule_id,)
             )
             cond_rows = cur.fetchall()
             conditions = []
             for c_row in cond_rows:
-                # Value may be stored as JSON
                 raw_val = c_row["value"]
                 try:
                     val = json.loads(raw_val)
@@ -76,6 +113,7 @@ class RuleRepository:
                 is_enabled=bool(row["is_enabled"]),
                 logical_op=LogicalOperator(row["logical_op"]),
                 conditions=conditions,
+                condition_groups=condition_groups,
                 action=action,
                 created_at=datetime.fromisoformat(row["created_at"]),
                 updated_at=datetime.fromisoformat(row["updated_at"]),
@@ -92,7 +130,7 @@ class RuleRepository:
         return None
 
     def save(self, rule: Rule) -> None:
-        """Inserts or updates a rule and its conditions atomically."""
+        """Inserts or updates a rule, its condition groups, and conditions atomically."""
         conn = self.db.get_connection()
         now_str = datetime.now(timezone.utc).isoformat()
         action_json = rule.action.model_dump_json()
@@ -123,13 +161,44 @@ class RuleRepository:
                 now_str,
             ))
 
-            # Replace conditions
+            # Delete old groups and conditions
+            conn.execute("DELETE FROM rule_groups WHERE rule_id = ?", (rule.id,))
             conn.execute("DELETE FROM rule_conditions WHERE rule_id = ?", (rule.id,))
+
+            # Insert condition groups if present
+            for order, group in enumerate(rule.condition_groups):
+                conn.execute("""
+                    INSERT INTO rule_groups (id, rule_id, logical_op, group_order, description)
+                    VALUES (?, ?, ?, ?, ?)
+                """, (
+                    group.id,
+                    rule.id,
+                    group.logical_op.value,
+                    order,
+                    group.description or "",
+                ))
+                for cond in group.conditions:
+                    val_str = json.dumps(cond.value) if not isinstance(cond.value, str) else cond.value
+                    conn.execute("""
+                        INSERT INTO rule_conditions (id, rule_id, group_id, target, operator, value, case_sensitive, description)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        cond.id,
+                        rule.id,
+                        group.id,
+                        cond.target.value,
+                        cond.operator.value,
+                        val_str,
+                        1 if cond.case_sensitive else 0,
+                        cond.description or "",
+                    ))
+
+            # Insert legacy/flat conditions (without group_id)
             for cond in rule.conditions:
                 val_str = json.dumps(cond.value) if not isinstance(cond.value, str) else cond.value
                 conn.execute("""
-                    INSERT INTO rule_conditions (id, rule_id, target, operator, value, case_sensitive, description)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    INSERT INTO rule_conditions (id, rule_id, group_id, target, operator, value, case_sensitive, description)
+                    VALUES (?, ?, NULL, ?, ?, ?, ?, ?)
                 """, (
                     cond.id,
                     rule.id,

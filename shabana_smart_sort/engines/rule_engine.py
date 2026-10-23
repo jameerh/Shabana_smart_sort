@@ -49,32 +49,59 @@ class RuleEngine:
         return MatchResult(rule=None, reason="No matching rule found (Unmatched)")
 
     def evaluate_rule(self, rule: Rule, item: FileItem) -> Tuple[bool, str]:
-        """Evaluates a single rule against a file item."""
-        if not rule.conditions:
+        """Evaluates a single rule against a file item, supporting compound condition groups."""
+        groups = rule.get_effective_groups()
+        if not groups:
             return True, f"Rule '{rule.name}' has no conditions (matches all)"
+
+        matched_groups: List[str] = []
+        failed_groups: List[str] = []
+
+        for group_idx, group in enumerate(groups, 1):
+            group_matched, group_reason = self._evaluate_condition_group(group, item, group_idx)
+            if group_matched:
+                matched_groups.append(group_reason)
+            else:
+                failed_groups.append(group_reason)
+
+        if rule.logical_op == LogicalOperator.ALL:
+            # ALL groups must match (Group1 AND Group2)
+            if len(matched_groups) == len(groups):
+                return True, f"Rule '{rule.name}' matched all groups: " + " | ".join(matched_groups)
+            else:
+                return False, f"Rule '{rule.name}' failed: " + " | ".join(failed_groups)
+        else:
+            # ANY group matches (Group1 OR Group2)
+            if len(matched_groups) > 0:
+                return True, f"Rule '{rule.name}' matched group: " + " | ".join(matched_groups)
+            else:
+                return False, f"Rule '{rule.name}' matched no condition groups: " + " | ".join(failed_groups)
+
+    def _evaluate_condition_group(self, group, item: FileItem, group_idx: int) -> Tuple[bool, str]:
+        """Evaluates a single condition group (ALL or ANY)."""
+        if not group.conditions:
+            return True, f"Group #{group_idx} (empty - matches all)"
 
         matched_conditions: List[str] = []
         failed_conditions: List[str] = []
 
-        for cond in rule.conditions:
+        for cond in group.conditions:
             cond_matches, cond_reason = self._evaluate_condition(cond, item)
             if cond_matches:
                 matched_conditions.append(cond_reason)
             else:
                 failed_conditions.append(cond_reason)
 
-        if rule.logical_op == LogicalOperator.ALL:
-            # AND
-            if len(matched_conditions) == len(rule.conditions):
-                return True, f"Rule '{rule.name}' matched all conditions: " + "; ".join(matched_conditions)
+        if group.logical_op == LogicalOperator.ALL:
+            if len(matched_conditions) == len(group.conditions):
+                return True, f"Group #{group_idx} (AND) passed: [{', '.join(matched_conditions)}]"
             else:
-                return False, f"Rule '{rule.name}' failed conditions: " + "; ".join(failed_conditions)
+                return False, f"Group #{group_idx} (AND) failed: [{', '.join(failed_conditions)}]"
         else:
-            # ANY (OR)
             if len(matched_conditions) > 0:
-                return True, f"Rule '{rule.name}' matched condition: " + "; ".join(matched_conditions)
+                return True, f"Group #{group_idx} (OR) passed: [{', '.join(matched_conditions)}]"
             else:
-                return False, f"Rule '{rule.name}' matched none of the conditions"
+                return False, f"Group #{group_idx} (OR) failed all conditions"
 
     def _evaluate_condition(self, cond: RuleCondition, item: FileItem) -> Tuple[bool, str]:
         """Evaluates a single condition against a FileItem."""
@@ -261,6 +288,10 @@ class RuleEngine:
             return item.is_readonly
         elif target == ConditionTarget.IS_EMPTY:
             return item.is_empty
+        elif target == ConditionTarget.FILE_CONTENT:
+            return item.content_text or ""
+        elif target == ConditionTarget.IMAGE_OCR_TEXT:
+            return item.ocr_text or ""
         return ""
 
     def _parse_datetime(self, val: Any) -> Optional[datetime]:

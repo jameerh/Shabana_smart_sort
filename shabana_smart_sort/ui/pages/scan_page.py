@@ -95,25 +95,22 @@ class ScanPage(QWidget):
         filter_layout.addWidget(cat_label)
         filter_layout.addWidget(self.cat_filter_combo)
 
-        # Quick preset buttons
+        # Dynamic Rule Presets & Favorites
         filter_layout.addSpacing(10)
-        preset_label = QLabel("Presets:")
-        preset_label.setStyleSheet("color: #94A3B8;")
+        preset_label = QLabel("Rule Preset:")
+        preset_label.setStyleSheet("color: #94A3B8; font-weight: 600;")
         filter_layout.addWidget(preset_label)
 
-        presets = [
-            ("📜 Satbara", "preset_satbara"),
-            ("🌾 Farmer 27_", "preset_farmer"),
-            ("💬 WhatsApp", "preset_whatsapp"),
-            ("PDFs", "document"),
-            ("Images", "image"),
-            ("Archives", "archive"),
-        ]
-        for p_name, p_target in presets:
-            btn = QPushButton(p_name)
-            btn.setStyleSheet("padding: 3px 8px; font-size: 11px;")
-            btn.clicked.connect(lambda ch, t=p_target: self._handle_preset_click(t))
-            filter_layout.addWidget(btn)
+        self.rule_preset_combo = QComboBox()
+        self.rule_preset_combo.setMinimumWidth(180)
+        self.rule_preset_combo.setToolTip("Filter files matching any active or custom sorting rule")
+        self.rule_preset_combo.currentIndexChanged.connect(self._on_rule_preset_selected)
+        filter_layout.addWidget(self.rule_preset_combo)
+
+        # Container for favorite quick buttons
+        self.favorites_layout = QHBoxLayout()
+        self.favorites_layout.setSpacing(4)
+        filter_layout.addLayout(self.favorites_layout)
 
         all_btn = QPushButton("Reset Filters")
         all_btn.setStyleSheet("padding: 3px 8px; font-size: 11px; background-color: #475569;")
@@ -122,6 +119,12 @@ class ScanPage(QWidget):
         filter_layout.addStretch()
 
         layout.addLayout(filter_layout)
+
+        # Populate dynamic presets and subscribe to live changes
+        self._reload_rule_presets()
+        if hasattr(self.container, "event_bus") and self.container.event_bus:
+            from shabana_smart_sort.infrastructure.event_bus import RulesChangedEvent
+            self.container.event_bus.subscribe(RulesChangedEvent, lambda e: self._reload_rule_presets())
 
         # 3. File Table
         self.table = QTableWidget()
@@ -159,7 +162,53 @@ class ScanPage(QWidget):
         if chosen:
             self.folder_input.setText(chosen)
 
+    def _reload_rule_presets(self) -> None:
+        """Populates the dynamic rule selector and top 5 favorites directly from the repository."""
+        self.rule_preset_combo.blockSignals(True)
+        self.rule_preset_combo.clear()
+        self.rule_preset_combo.addItem("All Files (No Rule Filter)", "ALL")
+
+        rules = self.container.rule_workflow.get_all_rules(enabled_only=False)
+        for r in rules:
+            status_symbol = "✓" if r.is_enabled else "✗"
+            label = f"{status_symbol} {r.name} (#{r.priority})"
+            self.rule_preset_combo.addItem(label, r.id)
+
+        self.rule_preset_combo.blockSignals(False)
+
+        # Rebuild Top Favorites pill buttons (up to 5 most prominent rules)
+        # Clear existing buttons in favorites_layout
+        while self.favorites_layout.count():
+            child = self.favorites_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
+
+        # Favorite candidate names
+        fav_candidates = ["Satbara", "Farmer 27_", "WhatsApp", "PDF", "Images"]
+        added_favs = 0
+        for r in rules:
+            if added_favs >= 5:
+                break
+            # Match top candidates or high-priority enabled rules
+            is_candidate = any(c.lower() in r.name.lower() for c in fav_candidates)
+            if is_candidate or (r.is_enabled and added_favs < 3):
+                btn = QPushButton(f"⭐ {r.name}")
+                btn.setStyleSheet("padding: 3px 8px; font-size: 11px; background-color: #1E3A8A;")
+                btn.setToolTip(f"Quick filter by rule: {r.name}")
+                btn.clicked.connect(lambda ch, rid=r.id: self._select_rule_by_id(rid))
+                self.favorites_layout.addWidget(btn)
+                added_favs += 1
+
+    def _select_rule_by_id(self, rule_id: str) -> None:
+        idx = self.rule_preset_combo.findData(rule_id)
+        if idx >= 0:
+            self.rule_preset_combo.setCurrentIndex(idx)
+
+    def _on_rule_preset_selected(self, index: int) -> None:
+        self._apply_table_filters()
+
     def _handle_preset_click(self, target: str) -> None:
+        """Backward-compatible handler for scripts or programmatic presets."""
         if target == "preset_satbara":
             self.cat_filter_combo.setCurrentIndex(0)
             self.search_input.setText("satbara")
@@ -181,6 +230,8 @@ class ScanPage(QWidget):
     def _reset_filters(self) -> None:
         self.search_input.clear()
         self.cat_filter_combo.setCurrentIndex(0)
+        self.rule_preset_combo.setCurrentIndex(0)
+        self._apply_table_filters()
 
     def _start_scan(self) -> None:
         path_str = self.folder_input.text().strip()
@@ -260,9 +311,14 @@ class ScanPage(QWidget):
     def _apply_table_filters(self) -> None:
         query = self.search_input.text().strip().lower()
         selected_cat = self.cat_filter_combo.currentData()
+        selected_rule_id = self.rule_preset_combo.currentData()
+
+        # If a specific rule is selected, look up that rule
+        target_rule = None
+        if selected_rule_id and selected_rule_id != "ALL":
+            target_rule = self.container.rule_repo.get_by_id(selected_rule_id)
 
         visible_count = 0
-        total_visible_bytes = 0
 
         for row in range(self.table.rowCount()):
             name_item = self.table.item(row, 0)
@@ -273,7 +329,13 @@ class ScanPage(QWidget):
             name_match = (query in name_item.text().lower()) if query else True
             cat_match = (selected_cat == "ALL" or cat_item.text().lower() == selected_cat.lower())
 
-            match = name_match and cat_match
+            rule_match = True
+            if target_rule and row < len(self.scanned_files):
+                file_item = self.scanned_files[row]
+                matches, _ = self.container.rule_engine.evaluate_rule(target_rule, file_item)
+                rule_match = matches
+
+            match = name_match and cat_match and rule_match
             self.table.setRowHidden(row, not match)
             if match:
                 visible_count += 1

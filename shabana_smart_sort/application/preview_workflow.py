@@ -33,8 +33,9 @@ class PreviewReport:
 class PreviewWorkflow:
     """Calculates non-destructive preview plans without changing the filesystem."""
 
-    def __init__(self, rule_engine: Optional[RuleEngine] = None):
+    def __init__(self, rule_engine: Optional[RuleEngine] = None, content_engine=None):
         self.rule_engine = rule_engine or RuleEngine()
+        self.content_engine = content_engine
 
     def generate_preview(
         self,
@@ -56,7 +57,20 @@ class PreviewWorkflow:
         collision_count = 0
         total_bytes = 0
 
+        # Check if any active rule checks FILE_CONTENT or IMAGE_OCR_TEXT
+        needs_content = False
+        if self.content_engine:
+            for r in rules:
+                for grp in r.get_effective_groups():
+                    for cond in grp.conditions:
+                        if cond.target.value in ("file_content", "image_ocr_text"):
+                            needs_content = True
+                            break
+
         for item in files:
+            if needs_content and self.content_engine:
+                self.content_engine.enrich_file_item(item)
+
             match_res = self.rule_engine.evaluate_file(item)
 
             if match_res.is_matched and match_res.rule is not None:

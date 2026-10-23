@@ -9,6 +9,7 @@ import logging
 from shabana_smart_sort.domain.models import FileItem
 from shabana_smart_sort.domain.rule_schema import Rule, RuleExportPack
 from shabana_smart_sort.engines.rule_engine import RuleEngine
+from shabana_smart_sort.infrastructure.event_bus import EventBus, RulesChangedEvent
 from shabana_smart_sort.repositories.rule_repository import RuleRepository
 
 logger = logging.getLogger("ShabanaSmartSort.RuleWorkflow")
@@ -17,8 +18,13 @@ logger = logging.getLogger("ShabanaSmartSort.RuleWorkflow")
 class RuleWorkflow:
     """Manages the full lifecycle of sorting rules."""
 
-    def __init__(self, rule_repo: RuleRepository):
+    def __init__(self, rule_repo: RuleRepository, event_bus: Optional[EventBus] = None):
         self.rule_repo = rule_repo
+        self.event_bus = event_bus
+
+    def _publish_changed(self, action: str = "updated", rule_id: str = "") -> None:
+        if self.event_bus:
+            self.event_bus.publish(RulesChangedEvent(action=action, rule_id=rule_id))
 
     def get_all_rules(self, enabled_only: bool = False) -> List[Rule]:
         return self.rule_repo.get_all(enabled_only=enabled_only)
@@ -31,13 +37,16 @@ class RuleWorkflow:
 
         rule.updated_at = datetime.now(timezone.utc)
         self.rule_repo.save(rule)
+        self._publish_changed("saved", rule.id)
         return True, None
 
     def delete_rule(self, rule_id: str) -> None:
         self.rule_repo.delete(rule_id)
+        self._publish_changed("deleted", rule_id)
 
     def set_rule_enabled(self, rule_id: str, enabled: bool) -> None:
         self.rule_repo.set_enabled(rule_id, enabled)
+        self._publish_changed("toggled", rule_id)
 
     def clone_rule(self, rule_id: str) -> Optional[Rule]:
         """Creates a duplicate of an existing rule with a new ID."""
@@ -56,10 +65,12 @@ class RuleWorkflow:
 
         cloned = Rule(**data)
         self.rule_repo.save(cloned)
+        self._publish_changed("cloned", cloned.id)
         return cloned
 
     def reorder_rules(self, rule_ids: List[str]) -> None:
         self.rule_repo.reorder(rule_ids)
+        self._publish_changed("reordered")
 
     def test_rule(self, rule: Rule, sample_files: List[FileItem]) -> List[Tuple[FileItem, bool, str]]:
         """Tests a candidate rule against sample files without saving or moving anything."""
@@ -108,6 +119,9 @@ class RuleWorkflow:
                     imported_count += 1
                 except Exception as e:
                     errors.append(f"Failed to import rule '{rule.name}': {e}")
+
+            if imported_count > 0:
+                self._publish_changed("imported")
 
         except Exception as e:
             errors.append(f"Invalid rules JSON schema: {e}")

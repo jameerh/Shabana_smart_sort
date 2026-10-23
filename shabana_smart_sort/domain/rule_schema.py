@@ -23,6 +23,14 @@ class RuleCondition(BaseModel):
     description: Optional[str] = None
 
 
+class ConditionGroup(BaseModel):
+    """A group of conditions evaluated together with a specific logical operator (ALL or ANY)."""
+    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    logical_op: LogicalOperator = LogicalOperator.ALL  # Default AND within group
+    conditions: List[RuleCondition] = Field(default_factory=list)
+    description: Optional[str] = None
+
+
 class RuleAction(BaseModel):
     """Destination and behavior specification for a matching rule."""
     action_type: ActionType = ActionType.MOVE
@@ -44,8 +52,9 @@ class Rule(BaseModel):
     description: str = ""
     priority: int = 100
     is_enabled: bool = True
-    logical_op: LogicalOperator = LogicalOperator.ALL
-    conditions: List[RuleCondition] = Field(default_factory=list)
+    logical_op: LogicalOperator = LogicalOperator.ALL  # Top-level combiner (e.g. OR across groups, or AND)
+    conditions: List[RuleCondition] = Field(default_factory=list)  # Legacy / flat conditions
+    condition_groups: List[ConditionGroup] = Field(default_factory=list)  # Advanced compound groups
     action: RuleAction = Field(default_factory=RuleAction)
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -53,6 +62,18 @@ class Rule(BaseModel):
 
     def matches_mode_all(self) -> bool:
         return self.logical_op == LogicalOperator.ALL
+
+    def get_effective_groups(self) -> List[ConditionGroup]:
+        """Returns condition_groups if present, or synthesizes a group from flat conditions."""
+        if self.condition_groups:
+            return self.condition_groups
+        if self.conditions:
+            return [ConditionGroup(
+                id=f"{self.id}_legacy_group",
+                logical_op=self.logical_op,
+                conditions=self.conditions
+            )]
+        return []
 
 
 class RuleExportPack(BaseModel):

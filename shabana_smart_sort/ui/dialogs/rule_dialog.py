@@ -201,15 +201,43 @@ class RuleDialog(QDialog):
     def _refresh_conditions_table(self) -> None:
         self.cond_table.setRowCount(len(self._conditions))
         for row, cond in enumerate(self._conditions):
-            self.cond_table.setItem(row, 0, QTableWidgetItem(cond.target.value))
-            self.cond_table.setItem(row, 1, QTableWidgetItem(cond.operator.value))
+            # Target Combobox
+            target_combo = QComboBox()
+            for target in ConditionTarget:
+                target_combo.addItem(target.value, target)
+            idx_t = target_combo.findData(cond.target)
+            if idx_t >= 0:
+                target_combo.setCurrentIndex(idx_t)
+            target_combo.currentIndexChanged.connect(lambda idx, r=row, cb=target_combo: self._on_target_changed(r, cb.currentData()))
+            self.cond_table.setCellWidget(row, 0, target_combo)
+
+            # Operator Combobox
+            op_combo = QComboBox()
+            for op in ConditionOperator:
+                op_combo.addItem(op.value, op)
+            idx_op = op_combo.findData(cond.operator)
+            if idx_op >= 0:
+                op_combo.setCurrentIndex(idx_op)
+            op_combo.currentIndexChanged.connect(lambda idx, r=row, cb=op_combo: self._on_op_changed(r, cb.currentData()))
+            self.cond_table.setCellWidget(row, 1, op_combo)
+
+            # Value Item
             val_str = str(cond.value)
             if isinstance(cond.value, list):
                 val_str = ", ".join(str(x) for x in cond.value)
-            self.cond_table.setItem(row, 2, QTableWidgetItem(val_str))
+            val_item = QTableWidgetItem(val_str)
+            self.cond_table.setItem(row, 2, val_item)
+
+    def _on_target_changed(self, row: int, new_target: ConditionTarget) -> None:
+        if row < len(self._conditions):
+            self._conditions[row].target = new_target
+
+    def _on_op_changed(self, row: int, new_op: ConditionOperator) -> None:
+        if row < len(self._conditions):
+            self._conditions[row].operator = new_op
 
     def _add_condition(self) -> None:
-        # Default new condition
+        self._sync_table_values_to_conditions()
         self._conditions.append(RuleCondition(
             target=ConditionTarget.EXTENSION,
             operator=ConditionOperator.IS_ONE_OF,
@@ -217,7 +245,18 @@ class RuleDialog(QDialog):
         ))
         self._refresh_conditions_table()
 
+    def _sync_table_values_to_conditions(self) -> None:
+        for r in range(self.cond_table.rowCount()):
+            if r < len(self._conditions):
+                val_item = self.cond_table.item(r, 2)
+                val_text = val_item.text().strip() if val_item else ""
+                if "," in val_text:
+                    self._conditions[r].value = [x.strip() for x in val_text.split(",") if x.strip()]
+                else:
+                    self._conditions[r].value = val_text
+
     def _remove_selected_condition(self) -> None:
+        self._sync_table_values_to_conditions()
         selected_rows = sorted({idx.row() for idx in self.cond_table.selectedIndexes()}, reverse=True)
         for r in selected_rows:
             if r < len(self._conditions):
@@ -259,21 +298,8 @@ class RuleDialog(QDialog):
             QMessageBox.warning(self, "Validation Error", "Please add at least one condition.")
             return
 
-        # Update values from table edits if any
-        for r in range(self.cond_table.rowCount()):
-            target_text = self.cond_table.item(r, 0).text()
-            op_text = self.cond_table.item(r, 1).text()
-            val_text = self.cond_table.item(r, 2).text().strip()
-
-            # Normalize values
-            if "," in val_text:
-                val = [x.strip() for x in val_text.split(",") if x.strip()]
-            else:
-                val = val_text
-
-            self._conditions[r].target = ConditionTarget(target_text)
-            self._conditions[r].operator = ConditionOperator(op_text)
-            self._conditions[r].value = val
+        # Synchronize values and combobox selections
+        self._sync_table_values_to_conditions()
 
         rule_id = self.existing_rule.id if self.existing_rule else None
         logical_op = LogicalOperator.ANY if self.rb_any.isChecked() else LogicalOperator.ALL

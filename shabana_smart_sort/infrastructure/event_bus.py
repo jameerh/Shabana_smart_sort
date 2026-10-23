@@ -48,6 +48,13 @@ class UndoProgressEvent(Event):
         self.filename = filename
 
 
+class RulesChangedEvent(Event):
+    """Fired whenever rules are added, updated, reordered, deleted, or toggled."""
+    def __init__(self, action: str = "updated", rule_id: str = ""):
+        self.action = action
+        self.rule_id = rule_id
+
+
 class EventBus:
     """Thread-safe event pub/sub dispatcher."""
 

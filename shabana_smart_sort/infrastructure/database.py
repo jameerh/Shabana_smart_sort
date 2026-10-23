@@ -201,3 +201,50 @@ class DatabaseManager:
                 conn.execute(
                     "INSERT INTO schema_migrations (version, applied_at) VALUES (1, datetime('now'));"
                 )
+
+        # Migration 2: Rule condition groups and content index cache
+        if 2 not in applied:
+            logger.info("Applying migration 2: Rule condition groups and content cache")
+            with conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS rule_groups (
+                        id TEXT PRIMARY KEY,
+                        rule_id TEXT NOT NULL,
+                        logical_op TEXT NOT NULL DEFAULT 'all',
+                        group_order INTEGER NOT NULL DEFAULT 0,
+                        description TEXT,
+                        FOREIGN KEY(rule_id) REFERENCES rules(id) ON DELETE CASCADE
+                    );
+                """)
+
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_rule_groups_rule_id
+                    ON rule_groups(rule_id);
+                """)
+
+                # Check if group_id column exists on rule_conditions
+                cur.execute("PRAGMA table_info(rule_conditions);")
+                cols = {r["name"] for r in cur.fetchall()}
+                if "group_id" not in cols:
+                    conn.execute("ALTER TABLE rule_conditions ADD COLUMN group_id TEXT;")
+
+                # Content extraction and OCR cache table
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS file_content_index (
+                        path TEXT PRIMARY KEY,
+                        modified_at TEXT NOT NULL,
+                        size_bytes INTEGER NOT NULL,
+                        content_text TEXT,
+                        ocr_text TEXT,
+                        indexed_at TEXT NOT NULL
+                    );
+                """)
+
+                conn.execute("""
+                    CREATE INDEX IF NOT EXISTS idx_content_index_path
+                    ON file_content_index(path);
+                """)
+
+                conn.execute(
+                    "INSERT INTO schema_migrations (version, applied_at) VALUES (2, datetime('now'));"
+                )
